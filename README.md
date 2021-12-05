@@ -102,5 +102,4 @@ def output(msg,judge=0):
 
 ![Snipaste_2021-12-05_18-38-37](一个通用的poc模版/Snipaste_2021-12-05_18-38-37.png)
 
-这个poc模版我已经放在github上了，欢迎大家下载使用，当然也可以在公众号回复poc来获取。
 
