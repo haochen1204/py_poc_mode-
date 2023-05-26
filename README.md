@@ -1,3 +1,7 @@
+# 使用httpx替换requests库
+
+使用httpx库替代requests库，两者用法基本相同，但是httpx相较于requests库效率等有很大提升。
+
 # 更新代理池版
 
 使用代理池为github开源项目

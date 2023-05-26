@@ -4,30 +4,39 @@
 
 # 漏洞名称：
 # 漏洞编号：
-# poc作者：
+# poc作者：昊辰
 # 影响应用:             
 # 影响版本:
 # 漏洞类型：
 # 漏洞概述：
 # fofa查询：
 
-import requests
+import httpx
 import getopt
 import datetime
 import sys
 import threading
+import os
 import urllib3
 import time
 from colorama import init, Fore
+# 禁用https安全请求警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# 关闭自动恢复默认颜色
 init(autoreset=False) 
 
 lock = threading.Lock()
 global result_file_path
 global proxies_judge
-loop_name = ''
+global agents_judge
+global att_judge
 
-def exploit(url):
+# 漏洞名称
+loop_name = ''
+# 代理池地址
+proxypool_url = 'http://127.0.0.1:5555/random'
+
+def exploit(url,proxies):
     '''
         poc函数
         poc代码放在这里，这个函数的内容随便修改
@@ -40,18 +49,15 @@ def exploit(url):
                 3 出现错误的信息
     '''
     global proxies_judge
-    proxies = {
-    "http": 'http://127.0.0.1:8080',
-    "https": 'http://127.0.0.1:8080'
-    }
+    global agents_judge
     head = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36'}
     payload = "/xxx?=/etc/passwd"
     exp = url + payload
     try:
-        if proxies_judge:
-            re = requests.get(exp,verify=False,timeout=5,proxies=proxies)
+        if proxies_judge or agents_judge:
+            re = httpx.get(exp,headers=head,verify=False,timeout=5,proxies=proxies)
         else:
-            re = requests.get(exp,verify=False,timeout=5)
+            re = httpx.get(exp,headers=head,verify=False,timeout=5)
         if re.status_code == 200:
             msg = "存在任意文件读取漏洞 "+exp
             judge = 1
@@ -63,6 +69,90 @@ def exploit(url):
         msg = 'error! 目标路径无法访问'
         judge = 3
     output(msg,judge)
+    return judge
+
+def attack(url,proxies):
+    '''
+        attack函数
+        攻击代码放在这里，这个函数的内容随便修改
+        可以使用接口output_to_file将信息输出到文件中
+        可以使用接口output将信息显示在命令行中（当print用就行）
+            output需要2个参数，一个为显示的信息，一个为信息的类型（int 0 1 2 3）
+                0 普通的信息
+                1 攻击成功的信息
+                2 攻击失败的信息
+                3 出现错误的信息
+    '''
+    global proxies_judge
+    global agents_judge
+    head = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36'}
+    payload = "/xxx?=/etc/passwd"
+    exp = url + payload
+    try:
+        if proxies_judge or agents_judge:
+            re = httpx.get(exp,headers=head,verify=False,timeout=5,proxies=proxies)
+        else:
+            re = httpx.get(exp,headers=head,verify=False,timeout=5)
+        if re.status_code == 200:
+            msg = "存在任意文件读取漏洞 "+exp
+            judge = 1
+            output_to_file(msg)
+        else:
+            msg = '不存在任意文件读取漏洞'+url
+            judge = 2
+    except:
+        msg = 'error! 目标路径无法访问'
+        judge = 3
+    output(msg,judge)
+    return judge
+
+def get_random_proxy():
+    """
+        从代理池获取一个代理ip
+        使用代理池项目：https://github.com/Python3WebSpider/ProxyPool
+        如需要使用其他代理池，请自行修改该函数，返回结果为一个可以用的代理ip及其端口
+    """
+    return requests.get(proxypool_url).text.strip()
+
+def handle(url,retry_num):
+    """
+        扫描前的处理函数
+        主要负责在使用代理时代理ip的配置
+        以及使用代理池时，因为代理池原因可能造成的访问失败时进行的重放攻击
+    """
+    global proxies_judge
+    global agents_judge
+    global att_judge
+    proxies={}
+    if proxies_judge:
+        proxies = {
+        "http": 'http://127.0.0.1:8080',
+        "https": 'http://127.0.0.1:8080'
+        } 
+    fail_num = 0
+    if agents_judge:
+        while True:
+            proxie = get_random_proxy()
+            proxies = {
+            'http':'http://'+proxie,
+            'https':'http://'+proxie
+            }
+            if att_judge:
+                attack(url,proxies)
+            else:
+                judge = exploit(url,proxies)
+            if judge != 3:
+                break
+            else:
+                fail_num+=1
+                time.sleep(2)
+            if fail_num > retry_num:
+                break
+    else:
+        if att_judge:
+            attack(url,proxies)
+        else:
+            judge = exploit(url,proxies)
 
 def output_to_file(msg):
     '''
@@ -111,11 +201,14 @@ def help():
     -r --resutl_file            输出的信息文件地址（默认为resutl.txt）
     -t --thread_num             多线程数量（默认50）
     -p --proxies                是否开启代理,默认不开启，输入则开启，一般用于brup抓测试
+    -a --agents                 是否启用代理池,并且访问失败后重试的次数
+    --att                       对目标进行攻击（如果写了攻击脚本）
 eg：
     python3 poc模版.py -u http://www.xxx.com
     python3 poc模版.py -f target.txt
     python3 poc模版.py -f target.txt -r result.txt
     python3 poc模版.py -f target.txt -r result.txt -t 100
+    python3 poc模版.py -f target.txt --att
     """)
 
 def poc_head():
@@ -135,19 +228,27 @@ def poc_head():
 def main():
     global proxies_judge
     global result_file_path
+    global agents_judge
+    global att_judge
+    global cmd
     result_file_path = 'result.txt'
     target_num = 50
     target_file_path = ''
+    cmd = ''
     url = ''
     msg = []
     proxies_judge = False
+    agents_judge = False
+    att_judge = False
+    retry_num = 5
+    loop_num = 0
 
     poc_head()
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], 
-        "hf:r:t:u:p",
-        ["help","target_file=","result_file=","thread_num=","url=","--proxies"])
+        "hf:r:t:u:pa:",
+        ["help","target_file=","result_file=","thread_num=","url=","proxies",'agents=',"att","cmd="])
     except getopt.GetoptError as err:
         print(str(err))
         help()
@@ -171,26 +272,35 @@ def main():
             target_num = int(a)
         elif o in ['-p',"--proxies"]:
             proxies_judge = True
+        elif o in ['-a','--agents']:
+            agents_judge = True
+            if a != '':
+                retry_num = int(a)
+        elif o in ['--att']:
+            att_judge = True
 
     i = 0
     if url == '' and len(msg) != 0:
         while True:
             if threading.active_count()-1 < target_num and i < len(msg):
-                t = threading.Thread(target=exploit,args=(msg[i],))
+                t = threading.Thread(target=handle,args=(msg[i],retry_num))
                 t.start()
                 i+=1
                 output_msg = '第'+str(i)+'个目标开始检查，还有'+str(len(msg)-i)+'个目标待检查！'
                 output(output_msg)
             if i >= len(msg) and threading.active_count() == 1:
                 f = open(result_file_path,'r')
-                num = len(f.readlines())
-                output('finish! 共扫描'+str(len(msg))+'个网站，发现漏洞'+str(num)+'个！')
+                loop_num = len(f.readlines())
+                output('finish! 共扫描'+str(len(msg))+'个网站，发现漏洞'+str(loop_num)+'个！')
                 break
             elif i>= len(msg) and threading.active_count() > 1:
-                output('正在检测最后几个目标，请稍等...')
+                output('正在检测最后'+str(threading.active_count()-1)+'个目标，请稍等...')
                 time.sleep(5)
+        result_file_path_first = result_file_path.split('.')[0]
+        result_file_path_last = result_file_path.split('.')[1]
+        os.rename(result_file_path,result_file_path_first+'_'+str(loop_num)+'.'+result_file_path_last)
     elif url != '' and len(msg) == 0:
-        exploit(url)
+        handle(url,retry_num)
 
 if __name__ == '__main__':
     main()
